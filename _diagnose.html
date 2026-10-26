@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>银发守护 - 错误诊断</title>
+<style>
+body{font-family:monospace;font-size:14px;padding:20px;background:#1e1e1e;color:#d4d4d4}
+.ok{color:#4ec9b0}.err{color:#f44747}.warn{color:#dcdcaa}
+</style>
+</head>
+<body>
+<h2>银发守护 index.html 诊断报告</h2>
+<div id="report">运行中...</div>
+<iframe id="testFrame" style="display:none"></iframe>
+<script>
+var report = document.getElementById("report");
+var logs = [];
+
+function log(msg, cls) {
+    logs.push('<div class="' + (cls||'') + '">' + msg + '</div>');
+}
+
+// 1. 检查 fetch 加载
+log("1. 尝试加载 index.html...", "");
+
+fetch("index.html")
+.then(function(r) { return r.text(); })
+.then(function(text) {
+    log("✓ index.html 加载成功，长度: " + text.length + " 字符", "ok");
+    
+    // 2. 检查 BOM
+    var hasBOM = text.charCodeAt(0) === 0xFEFF;
+    log(hasBOM ? "⚠ 检测到 BOM 头" : "✓ 无 BOM 问题", hasBOM ? "warn" : "ok");
+    
+    // 3. 检查 DOCTYPE
+    var hasDoctype = text.indexOf("<!DOCTYPE") >= 0;
+    log(hasDoctype ? "✓ DOCTYPE 存在" : "✗ 缺少 DOCTYPE", hasDoctype ? "ok" : "err");
+    
+    // 4. 检查 script 标签
+    var scriptCount = (text.match(/<script/g) || []).length;
+    var scriptCloseCount = (text.match(/<\/script>/g) || []).length;
+    log("script 标签: " + scriptCount + " 开 / " + scriptCloseCount + " 闭", scriptCount === scriptCloseCount ? "ok" : "err");
+    
+    // 5. 提取 JS 并检查语法
+    var scriptMatch = text.match(/<script>([\s\S]*?)<\/script>/);
+    if (scriptMatch) {
+        var js = scriptMatch[1];
+        log("✓ 提取到 JS 代码，长度: " + js.length, "ok");
+        
+        // 尝试执行 JS
+        try {
+            // 创建一个假的 window/document 环境来测试
+            var testHTML = text.replace("<script>", "<script>try{").replace("</script>", "}catch(e){document.body.innerHTML='<pre style=padding:20px;color:red>JS运行时错误: '+e.message+'\\n'+e.stack+'</pre>';throw e;}");
+            document.getElementById("testFrame").srcdoc = testHTML;
+            log("✓ JS 注入错误捕获，在 iframe 中测试...", "ok");
+            
+            setTimeout(function() {
+                try {
+                    var frame = document.getElementById("testFrame");
+                    var frameBody = frame.contentDocument.body;
+                    var hasContent = frameBody.innerHTML.length > 100;
+                    log(hasContent ? "✓ 页面内容正常渲染" : "✗ 页面内容为空", hasContent ? "ok" : "err");
+                    
+                    // 检查是否有错误信息
+                    var errMatch = frameBody.innerHTML.match(/JS运行时错误: (.+?)[\n<]/);
+                    if (errMatch) {
+                        log("✗ JS 运行时错误: " + errMatch[1], "err");
+                    }
+                } catch(e) {
+                    log("✗ iframe 访问错误: " + e.message, "err");
+                }
+                report.innerHTML = logs.join("");
+            }, 1000);
+        } catch(e) {
+            log("✗ JS 语法错误: " + e.message, "err");
+        }
+    }
+    
+    report.innerHTML = logs.join("");
+})
+.catch(function(err) {
+    log("✗ 加载失败: " + err.message, "err");
+    report.innerHTML = logs.join("");
+});
+</script>
+</body>
+</html>
