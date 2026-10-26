@@ -1,0 +1,10 @@
+fastapi==0.110.0
+uvicorn[standard]==0.27.0
+pydantic==2.6.0
+python-dotenv==1.0.1
+huaweicloudsdkcore==3.1.92
+huaweicloudsdkocr==3.1.92
+huaweicloudsdknlp==3.1.92
+huaweicloudsdksis==3.1.92
+esdk-obs-python==3.24.3
+httpx==0.27.0

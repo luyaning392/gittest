@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>银发守护 · SOS 联系子女按钮演示</title>
+<style>
+  :root{
+    --primary:#f97316; --danger:#dc2626; --muted:#6b7280; --text:#1f2937;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    background:#fff7ed;color:var(--text);line-height:1.7;font-size:18px;
+    padding:30px;min-height:100vh;
+  }
+  .demo-bar{background:#fff;border:2px solid #fed7aa;border-radius:12px;padding:16px 20px;margin-bottom:24px;font-size:16px;color:var(--muted)}
+  .demo-bar b{color:var(--primary)}
+  .modal-mask{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .modal{background:#fff;border-radius:20px;width:100%;max-width:420px;padding:28px;text-align:center;animation:pop .2s}
+  @keyframes pop{from{transform:scale(.9);opacity:0}to{transform:scale(1);opacity:1}}
+  .modal .m-icon{font-size:56px;margin-bottom:12px}
+  .modal h3{font-size:22px;margin-bottom:10px}
+  .modal p{font-size:17px;color:var(--muted);margin-bottom:20px;line-height:1.6}
+  .modal .m-btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  .modal .m-btn{border:none;border-radius:12px;padding:14px 24px;font-size:18px;font-weight:700;cursor:pointer}
+  .modal .m-btn.danger{background:var(--danger);color:#fff}
+  .modal .m-btn.ghost{background:#f3f4f6;color:var(--text)}
+  .info{background:#fff;border-radius:12px;padding:20px;margin-top:20px;border:1px solid #fed7aa}
+  .info h4{font-size:18px;margin-bottom:10px;color:var(--primary)}
+  .info p{font-size:15px;color:var(--muted);margin-bottom:8px}
+  .tag{display:inline-block;background:#f0fdf4;color:#16a34a;padding:2px 10px;border-radius:6px;font-size:14px;font-weight:700;margin-left:6px}
+</style>
+</head>
+<body>
+
+<div class="demo-bar">
+  🔍 <b>演示说明：</b>此页面模拟已绑定子女手机号（小明 · 138****8888）后点击"一键求助"的效果。
+  SOS 弹窗中会动态出现 <b>"📞 联系小明"</b> 按钮，点击直接拨打子女电话。
+</div>
+
+<!-- SOS 弹窗（已绑定子女，展示动态插入的按钮） -->
+<div class="modal-mask" id="sosModal">
+  <div class="modal">
+    <div class="m-icon">🆘</div>
+    <h3>紧急求助</h3>
+    <p id="sosText">
+      检测到您可能正在遭受诈骗！<br><br>
+      建议立即：<br>
+      1. 挂断电话 / 停止转账<br>
+      2. 拨打 110 报警<br>
+      3. 拨打 96110 反诈热线<br>
+      4. 联系小明：13800138888
+    </p>
+    <div class="m-btns">
+      <!-- ↓ 这个按钮是 openSos() 动态插入的，仅当已绑定子女时出现 ↓ -->
+      <button class="m-btn danger" id="callChildBtn">📞 联系小明</button>
+      <button class="m-btn danger" id="call110Btn">📞 拨打 110</button>
+      <button class="m-btn ghost" id="closeSosBtn">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div class="info">
+  <h4>📌 "📞 联系子女"按钮说明 <span class="tag">动态插入</span></h4>
+  <p>1. 按钮由 <code>openSos()</code> 函数在运行时通过 <code>document.createElement</code> 动态创建</p>
+  <p>2. 仅当 <code>localStorage.guard_phone</code> 有值（即已绑定子女手机号）时才插入</p>
+  <p>3. 点击触发 <code>window.location.href = "tel:13800138888"</code>，调起手机拨号</p>
+  <p>4. 未绑定时不显示此按钮，只显示 110 和关闭</p>
+</div>
+
+<div class="info">
+  <h4>🔄 对比：未绑定子女时的弹窗</h4>
+  <p>点击下方按钮查看未绑定状态（只有 110 和关闭，没有联系子女）：</p>
+  <button class="m-btn ghost" onclick="showUnbound()" style="margin-top:10px">查看未绑定状态</button>
+</div>
+
+<!-- 未绑定状态的弹窗 -->
+<div class="modal-mask" id="sosModalUnbound" style="display:none">
+  <div class="modal">
+    <div class="m-icon">🆘</div>
+    <h3>紧急求助</h3>
+    <p>
+      检测到您可能正在遭受诈骗！<br><br>
+      建议立即：<br>
+      1. 挂断电话 / 停止转账<br>
+      2. 拨打 110 报警<br>
+      3. 拨打 96110 反诈热线
+    </p>
+    <div class="m-btns">
+      <button class="m-btn danger">📞 拨打 110</button>
+      <button class="m-btn ghost" onclick="document.getElementById('sosModalUnbound').style.display='none'">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // 模拟已绑定
+  localStorage.setItem("guard_phone", "13800138888");
+  localStorage.setItem("guard_name", "小明");
+
+  document.getElementById("callChildBtn").addEventListener("click", function(){
+    alert("✅ 触发 tel: 协议\n\nwindow.location.href = \"tel:13800138888\"\n\n在手机上会直接调起拨号界面拨打子女电话。");
+  });
+  document.getElementById("call110Btn").addEventListener("click", function(){
+    alert("✅ 触发 tel: 协议\n\nwindow.location.href = \"tel:110\"\n\n在手机上会直接拨打 110 报警。");
+  });
+  document.getElementById("closeSosBtn").addEventListener("click", function(){
+    document.getElementById("sosModal").style.display = "none";
+  });
+
+  function showUnbound(){
+    document.getElementById("sosModalUnbound").style.display = "flex";
+  }
+</script>
+
+</body>
+</html>
