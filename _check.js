@@ -1,0 +1,348 @@
+
+(function(){
+  "use strict";
+
+  var API_BASE = window.SILVER_GUARD_API || "";
+
+  function apiPost(path, body){
+    return fetch(API_BASE + path, {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(body)
+    }).then(function(r){ return r.json(); });
+  }
+
+  var SCAM_PATTERNS = [
+    {type:"冒充公检法诈骗",icon:"👮",keywords:["公安局","警察","民警","检察院","检察官","法院","法官","逮捕","拘留","冻结账户","安全账户","涉嫌洗钱","配合调查","通缉","犯罪"],
+     advice:"公检法机关绝不会通过电话办案，更不会要求转账到所谓\"安全账户\"！这是最典型的诈骗话术。请立即挂断电话，拨打110或96110核实。"},
+    {type:"中奖/领取诈骗",icon:"🎁",keywords:["中奖","领取","奖金","手续费","保证金","先交钱","验证金","解冻金","个人所得税","公证费"],
+     advice:"正规中奖无需先交任何费用！凡是要求先转账\"手续费\"\"保证金\"才能领奖的，100%是诈骗，切勿转账。"},
+    {type:"保健品/养老诈骗",icon:"💊",keywords:["神药","特效药","祖传秘方","免费体验","健康讲座","养老理财","以房养老","收藏品","纪念币","限量发售"],
+     advice:"警惕针对老年人的\"免费体验\"\"健康讲座\"陷阱！这些往往诱导购买高价保健品或进行高风险投资，建议与子女商量后再决定。"},
+    {type:"投资理财/杀猪盘",icon:"📈",keywords:["投资","理财","高收益","稳赚不赔","内部消息","导师带单","杀猪盘","平台注册","提现失败","需充值","爆仓"],
+     advice:"\"高收益零风险\"不存在！凡是陌生人推荐投资平台、要求充值才能提现的，都是\"杀猪盘\"诈骗。立即停止操作，保留证据报警。"},
+    {type:"冒充亲友/紧急求助诈骗",icon:"👤",highRisk:true,keywords:["急需","急用","打钱","转账","转点钱","转钱","转笔钱","汇钱","汇款","打款","借钱","凑钱","垫付","换号了","这是我新号","在外面不方便","出事了","出事","手术费","住院","在医院","看病","车祸","被抓","病危","抢救","保证金","领导","张总","王总"],
+     advice:"收到亲友\"急需用钱\"的消息（尤其\"在医院、出车祸、被抓\"等紧急场景+要求转账），务必先电话或视频核实身份！骗子常盗用账号冒充亲友，切勿未经核实就转账。"},
+    {type:"冒充客服/退款诈骗",icon:"📞",keywords:["退款","退货","客服","订单异常","链接","填写银行卡","验证码","快递丢失","理赔","取消会员"],
+     advice:"正规退款会原路退回，无需你提供银行卡或验证码！凡是发链接要求填写银行卡/验证码的，都是诈骗，切勿点击。"},
+    {type:"贷款/办卡诈骗",icon:"💳",keywords:["贷款","无抵押","秒下款","额度","解冻费","工本费","包装费","征信不良","信用卡办理","刷流水"],
+     advice:"正规贷款不会要求先交\"解冻费\"\"工本费\"！凡放款前要求先转账的，都是诈骗。请通过银行正规渠道办理贷款。"},
+    {type:"刷单/兼职诈骗",icon:"💼",keywords:["刷单","刷信誉","兼职","点赞赚钱","垫付","返利","任务","佣金","动动手指","日结"],
+     advice:"\"刷单\"本身违法！凡是要求先垫付资金才能返利的\"兼职\"，都是诈骗。切勿参与任何形式的刷单。"}
+  ];
+
+  var KNOWLEDGE = [
+    {icon:"👮",title:"冒充公检法",feat:"\"你涉嫌洗钱，把钱转到安全账户\"",
+     body:"骗子冒充公检法，称你涉嫌犯罪，要求将资金转入\"安全账户\"配合调查。<span class='feat'>真相：</span>公检法不会电话办案，更没有\"安全账户\"。"},
+    {icon:"🎁",title:"中奖诈骗",feat:"\"恭喜中奖，先交手续费\"",
+     body:"通知你中奖，但领奖前要先交手续费、保证金。<span class='feat'>真相：</span>正规中奖无需先交钱，要求先转账的一律是诈骗。"},
+    {icon:"💊",title:"保健品诈骗",feat:"\"免费体验、神药治百病\"",
+     body:"以免费体验、健康讲座为诱饵，推销高价保健品。<span class='feat'>真相：</span>\"神药\"不存在，购买前务必与子女商量。"},
+    {icon:"📈",title:"投资理财诈骗",feat:"\"高收益、稳赚不赔\"",
+     body:"陌生人推荐投资平台，承诺高回报，充值后无法提现。<span class='feat'>真相：</span>高收益必高风险，\"稳赚不赔\"是骗局。"},
+    {icon:"👤",title:"冒充亲友",feat:"\"妈，我出事了，快打钱\"",
+     body:"盗用亲友账号，称出事急需用钱。<span class='feat'>真相：</span>务必电话/视频核实身份，切勿直接转账。"},
+    {icon:"📞",title:"客服退款",feat:"\"订单异常，点链接退款\"",
+     body:"冒充客服，发链接要求填银行卡和验证码。<span class='feat'>真相：</span>退款原路退回，无需提供验证码。"},
+    {icon:"💳",title:"贷款诈骗",feat:"\"无抵押秒下款，先交解冻费\"",
+     body:"称可无抵押贷款，放款前要交解冻费、工本费。<span class='feat'>真相：</span>正规贷款不收前期费用，请找银行办理。"},
+    {icon:"💼",title:"刷单兼职",feat:"\"动动手指，日赚几百\"",
+     body:"以刷单兼职为名，要求先垫付资金才能返利。<span class='feat'>真相:</span>刷单违法，垫付返利都是骗局。"}
+  ];
+
+  // 通用可疑特征词库（兜底检测陌生诈骗话术）
+  var SUSPICIOUS_SIGNALS = [
+    {cat:"涉及资金", words:["转账","汇款","打钱","交钱","缴费","充值","余额","银行卡","卡号","密码","支付宝","网银","取款","存款","退款","返现","缴纳","汇入","转出","账号","转钱","微信"]},
+    {cat:"紧急施压", words:["立即","马上","赶紧","尽快","否则","后果","严重","紧急","限时","逾期","最后","小时内","分钟内","立刻","务必","不然"]},
+    {cat:"索要信息", words:["验证码","身份证","密码","银行卡号","手机号","个人信息","人脸","指纹","短信码","动态码"]},
+    {cat:"冒充权威", words:["公安","警察","法院","政府","官方","客服","工作人员","主任","队长","领导","总局","分局","检察院","监管","机构"]},
+    {cat:"引导操作", words:["加微信","加qq","点击链接","扫码","拨打电话","联系","添加","进入","登录","填写","点击","下载"]},
+    {cat:"诈骗话术", words:["安全账户","清查","核查","冻结","解冻","注销","取消","涉嫌","违规","异常","系统检测","后台","洗钱","犯罪","立案","处罚"]}
+  ];
+
+  function detect(text){
+    text = text.toLowerCase();
+    var hits = [];
+    var totalKw = 0;
+    var hasHighRiskType = false;
+    SCAM_PATTERNS.forEach(function(p){
+      var matched = [];
+      p.keywords.forEach(function(kw){
+        if(text.indexOf(kw.toLowerCase()) >= 0){ matched.push(kw); }
+      });
+      if(matched.length > 0){
+        hits.push({type:p.type, icon:p.icon, keywords:matched, advice:p.advice});
+        totalKw += matched.length;
+        if(p.highRisk){ hasHighRiskType = true; }
+      }
+    });
+    var level, levelText, levelIcon;
+    if(hits.length === 0){
+      var susCats = [];
+      var susWords = [];
+      SUSPICIOUS_SIGNALS.forEach(function(s){
+        var matched = s.words.filter(function(w){ return text.indexOf(w) >= 0; });
+        if(matched.length > 0){ susCats.push(s.cat); susWords = susWords.concat(matched); }
+      });
+      if(/https?:\/\//.test(text) || /www\./.test(text)){ susCats.push("包含链接"); susWords.push("网址链接"); }
+      if(/00\d{6,}/.test(text) || /\d{11}/.test(text)){ susCats.push("包含电话号码"); susWords.push("电话号码"); }
+      if(susCats.length >= 3){
+        hits.push({type:"可疑信息", icon:"⚠️", keywords:susWords.slice(0,8), advice:"虽然未匹配到已知诈骗类型，但检测到多个可疑特征（" + susCats.join("、") + "）。请保持警惕：不轻易转账、不提供个人信息、不点击不明链接。有疑问请拨打 96110 反诈热线咨询。"});
+        totalKw = susWords.length;
+        level = "mid"; levelText = "中风险 · 存在可疑特征"; levelIcon = "⚠️";
+      } else {
+        level = "low"; levelText = "未发现诈骗风险"; levelIcon = "✅";
+      }
+    } else if((hasHighRiskType && totalKw >= 2) || hits.length >= 2 || totalKw >= 4){
+      level = "high"; levelText = "高风险 · 极可能是诈骗"; levelIcon = "🚨";
+    } else {
+      level = "mid"; levelText = "中风险 · 存在诈骗嫌疑"; levelIcon = "⚠️";
+    }
+    return {level:level, levelText:levelText, levelIcon:levelIcon, hits:hits, totalKw:totalKw};
+  }
+
+  function renderResult(r){
+    r.levelText = r.levelText || r.level_text || "";
+    r.levelIcon = r.levelIcon || r.level_icon || "";
+    r.totalKw = r.totalKw != null ? r.totalKw : (r.total_keywords || 0);
+    var card = document.getElementById("resultCard");
+    var body = document.getElementById("resultBody");
+    var html = '<div class="risk-badge ' + r.level + '">' + r.levelIcon + ' ' + r.levelText + '</div>';
+    if(r.hits.length === 0){
+      html += '<div class="advice"><div class="title-row">✅ 暂未识别到诈骗特征</div>';
+      html += '这段内容未匹配到常见诈骗话术。但仍请保持警惕：<br>• 不轻信陌生来电和短信<br>• 不随意点击不明链接<br>• 不向陌生人转账汇款<br>• 有疑问拨打 96110 反诈热线咨询</div>';
+    } else {
+      html += '<div class="result-section"><div class="result-label">识别到的诈骗类型</div>';
+      r.hits.forEach(function(h){
+        html += '<div class="result-value type">' + h.icon + ' ' + h.type + '</div>';
+        html += '<div class="keywords">';
+        h.keywords.forEach(function(kw){ html += '<span class="kw">' + kw + '</span>'; });
+        html += '</div>';
+      });
+      html += '</div>';
+      html += '<div class="result-section"><div class="result-label">AI 分析说明</div>';
+      html += '<div class="result-value">共命中 ' + r.hits.length + ' 种诈骗类型，' + r.totalKw + ' 个可疑关键词。';
+      if(r.level === "high") html += "话术特征高度吻合典型诈骗模式，风险极大！";
+      else html += "部分话术与诈骗特征相似，需警惕。";
+      html += '</div></div>';
+      html += '<div class="advice"><div class="title-row">🛡️ 防范建议</div>';
+      r.hits.forEach(function(h){ html += '<p style="margin-bottom:10px"><b>' + h.type + '：</b>' + h.advice + '</p>'; });
+      html += '</div>';
+      if(r.level === "high"){
+        html += '<button class="btn btn-primary" style="background:var(--danger);margin-top:14px" id="resultSosBtn">🆘 立即求助 / 联系子女</button>';
+      }
+    }
+    body.innerHTML = html;
+    card.classList.add("show");
+    card.scrollIntoView({behavior:"smooth", block:"start"});
+    var rsb = document.getElementById("resultSosBtn");
+    if(rsb) rsb.addEventListener("click", function(){ openSos(r); });
+    if(r.level === "high"){ notifyGuard(r); }
+  }
+
+  function notifyGuard(r){
+    var name = localStorage.getItem("guard_name") || "";
+    var phone = localStorage.getItem("guard_phone") || "";
+    var status = document.getElementById("guardStatus");
+    if(!phone){ return; }
+
+    var scamTypes = (r.hits || []).map(function(h){ return h.type; }).join("、") || "疑似诈骗";
+    var smsBody = "【银发守护预警】家人可能正遭遇诈骗（" + scamTypes + "），请立即电话确认，切勿转账！";
+
+    status.innerHTML =
+      '⚠️ 已识别高风险诈骗！请立即联系' + (name || "子女") + '：<br>' +
+      '<a class="guard-act" href="tel:' + phone + '">📞 拨打 ' + phone + '</a>' +
+      '<a class="guard-act ghost" href="sms:' + phone + '?body=' + encodeURIComponent(smsBody) + '">💬 发送预警短信</a>';
+    status.style.color = "var(--danger)";
+
+    if(API_BASE){
+      apiPost("/api/guard/notify", {
+        level: r.level,
+        scam_types: (r.hits || []).map(function(h){ return h.type; }),
+        child_phone: phone,
+        child_name: name
+      }).catch(function(){ /* 网络异常时本地拨打/短信仍可用 */ });
+    }
+  }
+
+  function openSos(r){
+    var text = "检测到您可能正在遭受诈骗！<br><br>建议立即：<br>1. 挂断电话 / 停止转账<br>2. 拨打 110 报警<br>3. 拨打 96110 反诈热线";
+    var phone = localStorage.getItem("guard_phone") || "";
+    var mBtns = document.querySelector("#sosModal .m-btns");
+    var old = document.getElementById("callChildBtn");
+    if(old){ old.parentNode.removeChild(old); }
+    if(phone){
+      var name = localStorage.getItem("guard_name") || "子女";
+      text += "<br>4. 联系" + name + "：" + phone;
+      var btn = document.createElement("button");
+      btn.id = "callChildBtn";
+      btn.className = "m-btn danger";
+      btn.textContent = "📞 联系" + name;
+      btn.addEventListener("click", function(){ window.location.href = "tel:" + phone; });
+      mBtns.insertBefore(btn, mBtns.firstChild);
+    }
+    document.getElementById("sosText").innerHTML = text;
+    document.getElementById("sosModal").classList.add("show");
+  }
+
+  document.querySelectorAll(".tab").forEach(function(t){
+    t.addEventListener("click", function(){
+      document.querySelectorAll(".tab").forEach(function(x){ x.classList.remove("active"); });
+      t.classList.add("active");
+      document.querySelectorAll(".panel").forEach(function(p){ p.classList.remove("show"); });
+      document.getElementById("panel-" + t.getAttribute("data-tab")).classList.add("show");
+    });
+  });
+
+  document.getElementById("analyzeTextBtn").addEventListener("click", function(){
+    var text = document.getElementById("textInput").value.trim();
+    if(!text){ alert("请先输入要识别的内容"); return; }
+    var btn = document.getElementById("analyzeTextBtn");
+    btn.disabled = true; btn.textContent = "🔍 识别中...";
+    if(API_BASE){
+      apiPost("/api/detect/text", {text:text}).then(function(r){
+        btn.disabled = false; btn.textContent = "🔍 立即识别是否诈骗";
+        renderResult(r.hits ? r : detect(text));
+      }).catch(function(){
+        btn.disabled = false; btn.textContent = "🔍 立即识别是否诈骗";
+        renderResult(detect(text));
+      });
+    } else {
+      btn.disabled = false; btn.textContent = "🔍 立即识别是否诈骗";
+      renderResult(detect(text));
+    }
+  });
+
+  var smsFileObj = null;
+  var uploadArea = document.getElementById("uploadArea");
+  var smsFile = document.getElementById("smsFile");
+  uploadArea.addEventListener("click", function(){ smsFile.click(); });
+  smsFile.addEventListener("change", function(e){
+    smsFileObj = e.target.files[0];
+    if(!smsFileObj) return;
+    var reader = new FileReader();
+    reader.onload = function(ev){
+      document.getElementById("smsPreview").innerHTML =
+        '<img class="preview-img" src="' + ev.target.result + '">';
+      document.getElementById("analyzeSmsBtn").disabled = false;
+    };
+    reader.readAsDataURL(smsFileObj);
+  });
+  document.getElementById("analyzeSmsBtn").addEventListener("click", function(){
+    if(!smsFileObj){ alert("请先上传短信截图"); return; }
+    if(!API_BASE){ alert("截图识别需后端 OCR 服务。\n请启动后端（backend/main.py）并配置华为云 OCR 凭证。\n文字识别可离线使用。"); return; }
+    var btn = document.getElementById("analyzeSmsBtn");
+    btn.disabled = true; btn.textContent = "🔍 OCR 识别中...";
+    var fd = new FormData();
+    fd.append("file", smsFileObj);
+    fetch(API_BASE + "/api/detect/sms", {method:"POST", body:fd})
+      .then(function(r){ return r.json(); })
+      .then(function(r){
+        btn.disabled = false; btn.textContent = "🔍 识别截图中的诈骗信息";
+        if(r.ocr_text){
+          var ocrBox = document.createElement("div");
+          ocrBox.style.cssText = "background:#fffbeb;border:1px solid var(--border);border-radius:10px;padding:14px;margin-top:12px;font-size:16px;color:var(--muted)";
+          ocrBox.innerHTML = "<b>📷 华为云 OCR 识别结果：</b><br>" + r.ocr_text;
+          document.getElementById("smsPreview").appendChild(ocrBox);
+        }
+        renderResult(r.hits ? r : {level:"low",levelText:"未发现诈骗风险",levelIcon:"✅",hits:[],totalKw:0});
+      })
+      .catch(function(){
+        btn.disabled = false; btn.textContent = "🔍 识别截图中的诈骗信息";
+        alert("OCR 识别失败，请确认后端已启动且华为云 OCR 凭证已配置。");
+      });
+  });
+
+  var recording = false;
+  var micBtn = document.getElementById("micBtn");
+  var voiceStatus = document.getElementById("voiceStatus");
+  var mediaRecorder = null;
+  var audioChunks = [];
+  var audioBlob = null;
+  micBtn.addEventListener("click", function(){
+    if(!recording){
+      if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+        alert("当前浏览器不支持录音，请使用文字或截图识别。"); return;
+      }
+      navigator.mediaDevices.getUserMedia({audio:true}).then(function(stream){
+        recording = true;
+        micBtn.classList.add("recording");
+        micBtn.textContent = "🔴";
+        voiceStatus.textContent = "正在录音...请说话（再次点击结束）";
+        audioChunks = [];
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.ondataavailable = function(e){ audioChunks.push(e.data); };
+        mediaRecorder.onstop = function(){
+          audioBlob = new Blob(audioChunks, {type:"audio/wav"});
+          stream.getTracks().forEach(function(t){ t.stop(); });
+          voiceStatus.textContent = "✅ 录音结束，点击下方按钮识别";
+          document.getElementById("analyzeVoiceBtn").disabled = false;
+        };
+        mediaRecorder.start();
+      }).catch(function(){
+        alert("无法访问麦克风，请允许录音权限。");
+      });
+    } else {
+      recording = false;
+      micBtn.classList.remove("recording");
+      micBtn.textContent = "🎤";
+      if(mediaRecorder && mediaRecorder.state !== "inactive"){ mediaRecorder.stop(); }
+    }
+  });
+  document.getElementById("analyzeVoiceBtn").addEventListener("click", function(){
+    if(!audioBlob){ alert("请先录音"); return; }
+    if(!API_BASE){ alert("语音识别需后端 ASR 服务。\n请启动后端（backend/main.py）并配置华为云 SIS 凭证。\n文字识别可离线使用。"); return; }
+    var btn = document.getElementById("analyzeVoiceBtn");
+    btn.disabled = true; btn.textContent = "🔍 语音识别中...";
+    var reader = new FileReader();
+    reader.onloadend = function(){
+      var b64 = reader.result.split(",")[1];
+      apiPost("/api/detect/voice", {audio_base64:b64}).then(function(r){
+        btn.disabled = false; btn.textContent = "🔍 识别语音内容是否诈骗";
+        if(r.asr_text){
+          document.getElementById("voiceResult").innerHTML =
+            '<div style="background:#fffbeb;border:1px solid var(--border);border-radius:10px;padding:14px;margin-top:14px;font-size:16px;color:var(--muted)"><b>🎤 华为云语音识别结果：</b><br>' + r.asr_text + '</div>';
+        }
+        renderResult(r.hits ? r : {level:"low",levelText:"未发现诈骗风险",levelIcon:"✅",hits:[],totalKw:0});
+      }).catch(function(){
+        btn.disabled = false; btn.textContent = "🔍 识别语音内容是否诈骗";
+        alert("语音识别失败，请确认后端已启动且华为云 SIS 凭证已配置。");
+      });
+    };
+    reader.readAsDataURL(audioBlob);
+  });
+
+  var kl = document.getElementById("knowledgeList");
+  KNOWLEDGE.forEach(function(k){
+    var item = document.createElement("div");
+    item.className = "knowledge-item";
+    item.innerHTML = '<div class="ki-head"><span class="ki-icon">' + k.icon + '</span>' + k.title + '<span class="feat" style="margin-left:auto;font-size:15px">⚠️ ' + k.feat + '</span></div>' +
+      '<div class="ki-body">' + k.body + '</div>';
+    item.addEventListener("click", function(){ item.classList.toggle("open"); });
+    kl.appendChild(item);
+  });
+
+  document.getElementById("saveGuardBtn").addEventListener("click", function(){
+    var phone = document.getElementById("childPhone").value.trim();
+    var name = document.getElementById("childName").value.trim();
+    if(!phone){ alert("请输入子女手机号"); return; }
+    localStorage.setItem("guard_phone", phone);
+    localStorage.setItem("guard_name", name);
+    document.getElementById("guardStatus").textContent = "✅ 已绑定" + (name||"子女") + "（" + phone + "），高风险诈骗将自动通知。";
+    document.getElementById("guardStatus").style.color = "var(--success)";
+  });
+  (function(){
+    var phone = localStorage.getItem("guard_phone");
+    var name = localStorage.getItem("guard_name");
+    if(phone){
+      document.getElementById("childPhone").value = phone;
+      document.getElementById("childName").value = name || "";
+      document.getElementById("guardStatus").textContent = "✅ 已绑定" + (name||"子女") + "（" + phone + "），高风险诈骗将自动通知。";
+    }
+  })();
+
+  document.getElementById("sosBtn").addEventListener("click", function(){ openSos({}); });
+  document.getElementById("call110Btn").addEventListener("click", function(){ alert("正在拨打 110...（演示）"); });
+  document.getElementById("closeSosBtn").addEventListener("click", function(){ document.getElementById("sosModal").classList.remove("show"); });
+  document.getElementById("sosModal").addEventListener("click", function(e){ if(e.target === this) this.classList.remove("show"); });
+})();
