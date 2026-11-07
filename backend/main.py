@@ -48,15 +48,24 @@ def ocr_recognize(image_base64: str) -> str:
         return ""
     try:
         from huaweicloudsdkcore.auth.credentials import BasicCredentials
-        from huaweicloudsdkocr import OcrClient
-        from huaweicloudsdkocr.v2 import (
-            RecognizeGeneralTextRequest,
-            GeneralTextRequestBody,
-        )
+        try:
+            from huaweicloudsdkocr.v1 import OcrClient
+            from huaweicloudsdkocr.v1.region.ocr_region import OcrRegion
+            from huaweicloudsdkocr.v1.model import (
+                RecognizeGeneralTextRequest,
+                GeneralTextRequestBody,
+            )
+        except ImportError:
+            from huaweicloudsdkocr import OcrClient
+            from huaweicloudsdkocr.v2.region.ocr_region import OcrRegion
+            from huaweicloudsdkocr.v2 import (
+                RecognizeGeneralTextRequest,
+                GeneralTextRequestBody,
+            )
 
         credentials = BasicCredentials() \
             .with_ak(AK).with_sk(SK).with_project_id(PROJECT_ID)
-        client = OcrClient.new_builder().with_credentials(credentials).with_region(REGION).build()
+        client = OcrClient.new_builder().with_credentials(credentials).with_region(OcrRegion.value_of(REGION)).build()
 
         body = GeneralTextRequestBody(image=image_base64)
         request = RecognizeGeneralTextRequest(body=body)
@@ -113,22 +122,41 @@ def asr_recognize(audio_base64: str) -> str:
         return ""
     try:
         from huaweicloudsdkcore.auth.credentials import BasicCredentials
-        from huaweicloudsdksis import SisClient
-        from huaweicloudsdksis.v1 import (
-            RecognizeShortAudioRequest,
-            PostShortAudioReq,
-        )
+        try:
+            from huaweicloudsdksis.v1 import SisClient
+            from huaweicloudsdksis.v1.region.sis_region import SisRegion
+            from huaweicloudsdksis.v1.model import (
+                Config,
+                RecognizeShortAudioRequest,
+                PostShortAudioReq,
+            )
+        except ImportError:
+            from huaweicloudsdksis import SisClient
+            from huaweicloudsdksis.v1.region.sis_region import SisRegion
+            from huaweicloudsdksis.v1 import (
+                RecognizeShortAudioRequest,
+                PostShortAudioReq,
+            )
+            Config = None
 
         credentials = BasicCredentials() \
             .with_ak(AK).with_sk(SK).with_project_id(PROJECT_ID)
-        client = SisClient.new_builder().with_credentials(credentials).with_region(REGION).build()
+        client = SisClient.new_builder().with_credentials(credentials).with_region(SisRegion.value_of(REGION)).build()
 
-        body = PostShortAudioReq(
-            data=audio_base64,
-            audio_format="wav",
-            model_property="chinese_16k_general",
-            add_punctuation=True,
-        )
+        if "config" in PostShortAudioReq.openapi_types:
+            config = Config(
+                audio_format="wav",
+                _property="chinese_16k_general",
+                add_punc="yes",
+            )
+            body = PostShortAudioReq(data=audio_base64, config=config)
+        else:
+            body = PostShortAudioReq(
+                data=audio_base64,
+                audio_format="wav",
+                model_property="chinese_16k_general",
+                add_punctuation=True,
+            )
         request = RecognizeShortAudioRequest(body=body)
         response = client.recognize_short_audio(request)
 
@@ -143,21 +171,37 @@ def tts_synthesize(text: str) -> Optional[str]:
         return None
     try:
         from huaweicloudsdkcore.auth.credentials import BasicCredentials
-        from huaweicloudsdksis import SisClient
-        from huaweicloudsdksis.v1 import (
-            RunTtsRequest,
-            PostTtsReq,
-        )
+        try:
+            from huaweicloudsdksis.v1 import SisClient, RunTtsRequest
+            from huaweicloudsdksis.v1.region.sis_region import SisRegion
+            from huaweicloudsdksis.v1.model import PostCustomTTSReq, TtsConfig
+            PostTtsReq = None
+        except ImportError:
+            from huaweicloudsdksis import SisClient
+            from huaweicloudsdksis.v1 import RunTtsRequest, PostTtsReq
+            from huaweicloudsdksis.v1.region.sis_region import SisRegion
+            PostCustomTTSReq = None
+            TtsConfig = None
 
         credentials = BasicCredentials() \
             .with_ak(AK).with_sk(SK).with_project_id(PROJECT_ID)
-        client = SisClient.new_builder().with_credentials(credentials).with_region(REGION).build()
+        client = SisClient.new_builder().with_credentials(credentials).with_region(SisRegion.value_of(REGION)).build()
 
-        body = PostTtsReq(text=text, audio_format="wav", sample_rate=16000, voice="xiaoyan")
+        if PostCustomTTSReq:
+            config = TtsConfig(
+                audio_format="wav",
+                sample_rate="16000",
+                _property="chinese_xiaoyan_common",
+            )
+            body = PostCustomTTSReq(text=text, config=config)
+        else:
+            body = PostTtsReq(text=text, audio_format="wav", sample_rate=16000, voice="xiaoyan")
         request = RunTtsRequest(body=body)
         response = client.run_tts(request)
 
-        return response.result.audio if response.result else None
+        if not response.result:
+            return None
+        return getattr(response.result, "data", None) or getattr(response.result, "audio", None)
     except Exception as e:
         logger.error("TTS 语音合成失败: %s", e)
         return None

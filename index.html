@@ -249,14 +249,68 @@
 (function(){
   "use strict";
 
-  var API_BASE = window.SILVER_GUARD_API || "";
+  var API_BASE = window.SILVER_GUARD_API || (window.location.protocol === "file:" || window.location.port === "5500" ? "http://127.0.0.1:8000" : window.location.origin);
 
   function apiPost(path, body){
     return fetch(API_BASE + path, {
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify(body)
-    }).then(function(r){ return r.json(); });
+    }).then(function(r){
+      return r.json().then(function(data){
+        if(!r.ok){ throw new Error(data.detail || "请求失败"); }
+        return data;
+      });
+    });
+  }
+
+  function audioBlobToWav(blob){
+    var AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    var OfflineAudioContextClass = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if(!AudioContextClass || !OfflineAudioContextClass){
+      return Promise.reject(new Error("当前浏览器不支持音频格式转换，请改用文字输入。"));
+    }
+    var audioContext = new AudioContextClass();
+    return blob.arrayBuffer().then(function(data){
+      return audioContext.decodeAudioData(data);
+    }).then(function(decoded){
+      var sampleRate = 16000;
+      var offline = new OfflineAudioContextClass(1, Math.ceil(decoded.duration * sampleRate), sampleRate);
+      var source = offline.createBufferSource();
+      source.buffer = decoded;
+      source.connect(offline.destination);
+      source.start(0);
+      return offline.startRendering();
+    }).then(function(rendered){
+      var samples = rendered.getChannelData(0);
+      var wav = new ArrayBuffer(44 + samples.length * 2);
+      var view = new DataView(wav);
+      function writeString(offset, value){
+        for(var i = 0; i < value.length; i++){ view.setUint8(offset + i, value.charCodeAt(i)); }
+      }
+      writeString(0, "RIFF");
+      view.setUint32(4, 36 + samples.length * 2, true);
+      writeString(8, "WAVE");
+      writeString(12, "fmt ");
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, 16000, true);
+      view.setUint32(28, 32000, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      writeString(36, "data");
+      view.setUint32(40, samples.length * 2, true);
+      for(var i = 0; i < samples.length; i++){
+        var sample = Math.max(-1, Math.min(1, samples[i]));
+        view.setInt16(44 + i * 2, sample < 0 ? sample * 32768 : sample * 32767, true);
+      }
+      audioContext.close();
+      return new Blob([wav], {type:"audio/wav"});
+    }).catch(function(error){
+      audioContext.close();
+      throw error;
+    });
   }
 
   var SCAM_PATTERNS = [
@@ -348,7 +402,7 @@
     return {level:level, levelText:levelText, levelIcon:levelIcon, hits:hits, totalKw:totalKw};
   }
 
-  function renderResult(r){
+  function renderResult(r, suppressNotify){
     r.levelText = r.levelText || r.level_text || "";
     r.levelIcon = r.levelIcon || r.level_icon || "";
     r.totalKw = r.totalKw != null ? r.totalKw : (r.total_keywords || 0);
@@ -384,7 +438,20 @@
     card.scrollIntoView({behavior:"smooth", block:"start"});
     var rsb = document.getElementById("resultSosBtn");
     if(rsb) rsb.addEventListener("click", function(){ openSos(r); });
-    if(r.level === "high"){ notifyGuard(r); }
+    if(r.level === "high" && !suppressNotify){ notifyGuard(r); }
+  }
+
+  var textHighRiskAlerted = false;
+  var textInputTimer = null;
+
+  function renderTextResult(result){
+    var shouldIntervene = result.level === "high" && !textHighRiskAlerted;
+    if(shouldIntervene){ textHighRiskAlerted = true; }
+    renderResult(result, true);
+    if(shouldIntervene){
+      notifyGuard(result);
+      openSos(result);
+    }
   }
 
   function notifyGuard(r){
@@ -418,6 +485,8 @@
     var mBtns = document.querySelector("#sosModal .m-btns");
     var old = document.getElementById("callChildBtn");
     if(old){ old.parentNode.removeChild(old); }
+    var configureBtn = document.getElementById("configureChildBtn");
+    if(configureBtn){ configureBtn.parentNode.removeChild(configureBtn); }
     if(phone){
       var name = localStorage.getItem("guard_name") || "子女";
       text += "<br>4. 联系" + name + "：" + phone;
@@ -427,6 +496,19 @@
       btn.textContent = "📞 联系" + name;
       btn.addEventListener("click", function(){ window.location.href = "tel:" + phone; });
       mBtns.insertBefore(btn, mBtns.firstChild);
+    } else {
+      text += "<br><br>尚未在此页面保存子女电话，请先设置联系人。";
+      var configureBtn = document.createElement("button");
+      configureBtn.id = "configureChildBtn";
+      configureBtn.className = "m-btn ghost";
+      configureBtn.textContent = "设置子女电话";
+      configureBtn.addEventListener("click", function(){
+        document.getElementById("sosModal").classList.remove("show");
+        var phoneInput = document.getElementById("childPhone");
+        phoneInput.scrollIntoView({behavior:"smooth", block:"center"});
+        phoneInput.focus();
+      });
+      mBtns.insertBefore(configureBtn, mBtns.firstChild);
     }
     document.getElementById("sosText").innerHTML = text;
     document.getElementById("sosModal").classList.add("show");
@@ -449,15 +531,34 @@
     if(API_BASE){
       apiPost("/api/detect/text", {text:text}).then(function(r){
         btn.disabled = false; btn.textContent = "🔍 立即识别是否诈骗";
-        renderResult(r.hits ? r : detect(text));
+        renderTextResult(r.hits ? r : detect(text));
       }).catch(function(){
         btn.disabled = false; btn.textContent = "🔍 立即识别是否诈骗";
-        renderResult(detect(text));
+        renderTextResult(detect(text));
       });
     } else {
       btn.disabled = false; btn.textContent = "🔍 立即识别是否诈骗";
-      renderResult(detect(text));
+      renderTextResult(detect(text));
     }
+  });
+
+  document.getElementById("textInput").addEventListener("input", function(){
+    var text = this.value.trim();
+    clearTimeout(textInputTimer);
+    if(!text){
+      textHighRiskAlerted = false;
+      document.getElementById("resultCard").classList.remove("show");
+      return;
+    }
+    textInputTimer = setTimeout(function(){
+      var result = detect(text);
+      if(result.level === "low"){
+        textHighRiskAlerted = false;
+        document.getElementById("resultCard").classList.remove("show");
+        return;
+      }
+      renderTextResult(result);
+    }, 300);
   });
 
   var smsFileObj = null;
@@ -472,6 +573,7 @@
       document.getElementById("smsPreview").innerHTML =
         '<img class="preview-img" src="' + ev.target.result + '">';
       document.getElementById("analyzeSmsBtn").disabled = false;
+      document.getElementById("analyzeSmsBtn").click();
     };
     reader.readAsDataURL(smsFileObj);
   });
@@ -483,7 +585,12 @@
     var fd = new FormData();
     fd.append("file", smsFileObj);
     fetch(API_BASE + "/api/detect/sms", {method:"POST", body:fd})
-      .then(function(r){ return r.json(); })
+      .then(function(r){
+        return r.json().then(function(data){
+          if(!r.ok){ throw new Error(data.detail || "OCR 请求失败"); }
+          return data;
+        });
+      })
       .then(function(r){
         btn.disabled = false; btn.textContent = "🔍 识别截图中的诈骗信息";
         if(r.ocr_text){
@@ -494,9 +601,9 @@
         }
         renderResult(r.hits ? r : {level:"low",levelText:"未发现诈骗风险",levelIcon:"✅",hits:[],totalKw:0});
       })
-      .catch(function(){
+      .catch(function(error){
         btn.disabled = false; btn.textContent = "🔍 识别截图中的诈骗信息";
-        alert("OCR 识别失败，请确认后端已启动且华为云 OCR 凭证已配置。");
+        alert(error.message || "OCR 识别失败，请检查后端和华为云 OCR 配置。");
       });
   });
 
@@ -506,6 +613,67 @@
   var mediaRecorder = null;
   var audioChunks = [];
   var audioBlob = null;
+  var speechRecognition = null;
+  var voiceTranscript = "";
+  var highRiskAlerted = false;
+  var stopRecognition = false;
+
+  function startLiveSpeechRecognition(){
+    var RecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if(!RecognitionClass){ return false; }
+    speechRecognition = new RecognitionClass();
+    speechRecognition.lang = "zh-CN";
+    speechRecognition.continuous = true;
+    speechRecognition.interimResults = true;
+    speechRecognition.onresult = function(event){
+      var transcript = "";
+      for(var i = 0; i < event.results.length; i++){
+        transcript += event.results[i][0].transcript;
+      }
+      voiceTranscript = transcript.trim();
+      if(!voiceTranscript){ return; }
+      document.getElementById("voiceResult").textContent = "实时识别：" + voiceTranscript;
+      var result = detect(voiceTranscript);
+      if(result.level === "mid" || result.level === "high"){
+        renderResult(result, true);
+        voiceStatus.textContent = result.level === "high" ? "⚠️ 高风险内容，已触发提醒" : "检测到可疑内容，正在持续分析";
+        if(result.level === "high" && !highRiskAlerted){
+          highRiskAlerted = true;
+          notifyGuard(result);
+          openSos(result);
+          stopVoiceCapture();
+        }
+      }
+    };
+    speechRecognition.onerror = function(event){
+      if(event.error !== "no-speech" && event.error !== "aborted"){
+        voiceStatus.textContent = "实时转写不可用，录音结束后将自动识别";
+      }
+    };
+    speechRecognition.onend = function(){
+      if(recording && !stopRecognition){
+        try { speechRecognition.start(); } catch(e) { /* 浏览器仍在结束上一段识别 */ }
+      }
+    };
+    try {
+      speechRecognition.start();
+      return true;
+    } catch(e){
+      speechRecognition = null;
+      return false;
+    }
+  }
+
+  function stopVoiceCapture(){
+    if(!recording){ return; }
+    recording = false;
+    stopRecognition = true;
+    micBtn.classList.remove("recording");
+    micBtn.textContent = "🎤";
+    if(speechRecognition){ speechRecognition.stop(); }
+    if(mediaRecorder && mediaRecorder.state !== "inactive"){ mediaRecorder.stop(); }
+  }
+
   micBtn.addEventListener("click", function(){
     if(!recording){
       if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
@@ -513,27 +681,41 @@
       }
       navigator.mediaDevices.getUserMedia({audio:true}).then(function(stream){
         recording = true;
+        stopRecognition = false;
+        highRiskAlerted = false;
+        voiceTranscript = "";
+        document.getElementById("voiceResult").textContent = "";
         micBtn.classList.add("recording");
         micBtn.textContent = "🔴";
-        voiceStatus.textContent = "正在录音...请说话（再次点击结束）";
+        voiceStatus.textContent = "正在启动语音监听...";
         audioChunks = [];
+        audioBlob = null;
         mediaRecorder = new MediaRecorder(stream);
         mediaRecorder.ondataavailable = function(e){ audioChunks.push(e.data); };
         mediaRecorder.onstop = function(){
-          audioBlob = new Blob(audioChunks, {type:"audio/wav"});
           stream.getTracks().forEach(function(t){ t.stop(); });
-          voiceStatus.textContent = "✅ 录音结束，点击下方按钮识别";
-          document.getElementById("analyzeVoiceBtn").disabled = false;
+          voiceStatus.textContent = "正在处理录音...";
+          audioBlobToWav(new Blob(audioChunks, {type:mediaRecorder.mimeType || "audio/webm"})).then(function(wav){
+            audioBlob = wav;
+            document.getElementById("analyzeVoiceBtn").disabled = false;
+            voiceStatus.textContent = voiceTranscript ? "实时分析完成，正在进行完整语音复核..." : "正在自动提交录音识别...";
+            document.getElementById("analyzeVoiceBtn").click();
+          }).catch(function(error){
+            voiceStatus.textContent = "录音格式处理失败，请重试或使用文字输入。";
+            alert(error.message || "录音格式处理失败");
+          });
         };
         mediaRecorder.start();
+        if(startLiveSpeechRecognition()){
+          voiceStatus.textContent = "正在实时监听并分析风险...再次点击结束";
+        } else {
+          voiceStatus.textContent = "当前浏览器不支持实时转写，录音结束后自动识别";
+        }
       }).catch(function(){
         alert("无法访问麦克风，请允许录音权限。");
       });
     } else {
-      recording = false;
-      micBtn.classList.remove("recording");
-      micBtn.textContent = "🎤";
-      if(mediaRecorder && mediaRecorder.state !== "inactive"){ mediaRecorder.stop(); }
+      stopVoiceCapture();
     }
   });
   document.getElementById("analyzeVoiceBtn").addEventListener("click", function(){
@@ -550,10 +732,10 @@
           document.getElementById("voiceResult").innerHTML =
             '<div style="background:#fffbeb;border:1px solid var(--border);border-radius:10px;padding:14px;margin-top:14px;font-size:16px;color:var(--muted)"><b>🎤 华为云语音识别结果：</b><br>' + r.asr_text + '</div>';
         }
-        renderResult(r.hits ? r : {level:"low",levelText:"未发现诈骗风险",levelIcon:"✅",hits:[],totalKw:0});
-      }).catch(function(){
+        renderResult(r.hits ? r : {level:"low",levelText:"未发现诈骗风险",levelIcon:"✅",hits:[],totalKw:0}, highRiskAlerted);
+      }).catch(function(error){
         btn.disabled = false; btn.textContent = "🔍 识别语音内容是否诈骗";
-        alert("语音识别失败，请确认后端已启动且华为云 SIS 凭证已配置。");
+        alert(error.message || "语音识别失败，请检查后端和华为云 SIS 配置。");
       });
     };
     reader.readAsDataURL(audioBlob);
