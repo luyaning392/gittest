@@ -5,7 +5,6 @@ from typing import Literal, Optional
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -373,19 +372,6 @@ def tts(req: TextDetectRequest):
     if not audio:
         raise HTTPException(status_code=500, detail="语音合成失败")
     return {"audio_base64": audio, "format": "wav"}
-
-
-# ============ 静态前端托管（让 FastAPI 同时服务前端页面） ============
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-
-_static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-if os.path.isdir(_static_dir):
-    app.mount("/static", StaticFiles(directory=_static_dir), name="static")
-
-    @app.get("/")
-    def serve_index():
-        return FileResponse(os.path.join(_static_dir, "index.html"))
 
 
 if __name__ == "__main__":

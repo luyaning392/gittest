@@ -2,13 +2,13 @@
  * 前端内联脚本语法校验基线
  * 用途：抽取 HTML 中每个 <script> 块并用 Node vm.Script 编译，
  *       编译失败即输出错误并非零退出码（防止"解析期失败导致识别入口永久失效"回归）。
- * 用法：node _verify.js [html文件...]  默认检查 index.html 与 backend/static/index.html
+ * 用法：node _verify.js [html文件...]  默认检查独立前端入口 index.html
  */
 const fs = require("fs");
 const vm = require("vm");
 
 const targets = process.argv.slice(2);
-const files = targets.length ? targets : ["index.html", "backend/static/index.html"];
+const files = targets.length ? targets : ["index.html"];
 
 let failed = false;
 
