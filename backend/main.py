@@ -1,7 +1,7 @@
 import os
 import base64
 import logging
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,10 +36,18 @@ REGION = os.getenv("HUAWEI_REGION", "cn-north-4")
 PROJECT_ID = os.getenv("HUAWEI_PROJECT_ID", "")
 OBS_BUCKET = os.getenv("OBS_BUCKET", "silver-guard-assets")
 PANGU_MODEL_ID = os.getenv("PANGU_MODEL_ID", "")
+ASR_MODELS = {
+    "mandarin": "chinese_16k_general",
+    "sichuan": "sichuan_16k_common",
+    "cantonese": "cantonese_16k_common",
+    "shanghai": "shanghai_16k_common",
+}
 
 
 def _has_credentials() -> bool:
-    return bool(AK and SK)
+    values = (AK, SK, PROJECT_ID)
+    placeholders = ("your-", "your_", "<", "${")
+    return all(value.strip() and not value.strip().lower().startswith(placeholders) for value in values)
 
 
 def ocr_recognize(image_base64: str) -> str:
@@ -116,7 +124,7 @@ def nlp_enhance_detect(text: str, base_result: dict) -> dict:
     return base_result
 
 
-def asr_recognize(audio_base64: str) -> str:
+def asr_recognize(audio_base64: str, dialect: str = "mandarin") -> tuple[str, Optional[float]]:
     if not _has_credentials():
         logger.warning("华为云凭证未配置，ASR 返回空")
         return ""
@@ -143,10 +151,11 @@ def asr_recognize(audio_base64: str) -> str:
             .with_ak(AK).with_sk(SK).with_project_id(PROJECT_ID)
         client = SisClient.new_builder().with_credentials(credentials).with_region(SisRegion.value_of(REGION)).build()
 
+        model_property = ASR_MODELS.get(dialect, ASR_MODELS["mandarin"])
         if "config" in PostShortAudioReq.openapi_types:
             config = Config(
                 audio_format="wav",
-                _property="chinese_16k_general",
+                _property=model_property,
                 add_punc="yes",
             )
             body = PostShortAudioReq(data=audio_base64, config=config)
@@ -154,16 +163,18 @@ def asr_recognize(audio_base64: str) -> str:
             body = PostShortAudioReq(
                 data=audio_base64,
                 audio_format="wav",
-                model_property="chinese_16k_general",
+                model_property=model_property,
                 add_punctuation=True,
             )
         request = RecognizeShortAudioRequest(body=body)
         response = client.recognize_short_audio(request)
 
-        return response.result.text if response.result else ""
+        if not response.result:
+            return "", None
+        return response.result.text or "", getattr(response.result, "score", None)
     except Exception as e:
         logger.error("ASR 语音识别失败: %s", e)
-        return ""
+        return "", None
 
 
 def tts_synthesize(text: str) -> Optional[str]:
@@ -229,6 +240,7 @@ class TextDetectRequest(BaseModel):
 
 class VoiceDetectRequest(BaseModel):
     audio_base64: str
+    dialect: Literal["mandarin", "sichuan", "cantonese", "shanghai"] = "mandarin"
 
 
 class GuardNotifyRequest(BaseModel):
@@ -272,6 +284,11 @@ def detect_text(req: TextDetectRequest):
 
 @app.post("/api/detect/sms")
 async def detect_sms(file: UploadFile = File(...)):
+    if not _has_credentials():
+        raise HTTPException(
+            status_code=503,
+            detail="未配置真实华为云凭证。请在 backend/.env 中填写 HUAWEI_AK、HUAWEI_SK 和 HUAWEI_PROJECT_ID。",
+        )
     image_bytes = await file.read()
     if not image_bytes:
         raise HTTPException(status_code=400, detail="图片为空")
@@ -282,8 +299,8 @@ async def detect_sms(file: UploadFile = File(...)):
     ocr_text = ocr_recognize(image_b64)
     if not ocr_text:
         raise HTTPException(
-            status_code=500,
-            detail="OCR 识别失败，请检查华为云凭证配置；本地演示可使用前端内置检测",
+            status_code=502,
+            detail="华为云 OCR 调用失败或未识别到文字，请检查图片格式、OCR 服务权限及后端日志。",
         )
 
     result = detect(ocr_text)
@@ -296,19 +313,30 @@ async def detect_sms(file: UploadFile = File(...)):
 
 @app.post("/api/detect/voice")
 def detect_voice(req: VoiceDetectRequest):
+    if not _has_credentials():
+        raise HTTPException(
+            status_code=503,
+            detail="未配置真实华为云凭证。请在 backend/.env 中填写 HUAWEI_AK、HUAWEI_SK 和 HUAWEI_PROJECT_ID。",
+        )
     if not req.audio_base64:
         raise HTTPException(status_code=400, detail="audio_base64 不能为空")
+    if req.dialect != "mandarin" and REGION != "cn-north-4":
+        raise HTTPException(
+            status_code=400,
+            detail="当前方言模型仅支持 cn-north-4 区域，请调整 backend/.env 中的 HUAWEI_REGION。",
+        )
 
-    asr_text = asr_recognize(req.audio_base64)
+    asr_text, asr_confidence = asr_recognize(req.audio_base64, req.dialect)
     if not asr_text:
         raise HTTPException(
-            status_code=500,
-            detail="语音识别失败，请检查华为云凭证配置",
+            status_code=502,
+            detail="华为云 SIS 调用失败或未识别到语音，请检查服务权限、区域、音频格式及后端日志。",
         )
 
     result = detect(asr_text)
     result = nlp_enhance_detect(asr_text, result)
     result["asr_text"] = asr_text
+    result["asr_confidence"] = asr_confidence
 
     if result["level"] in ("mid", "high"):
         tts_audio = tts_synthesize(result["level_text"] + "，请立即停止操作并联系子女。")

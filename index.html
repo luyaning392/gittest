@@ -85,6 +85,11 @@
     border:2px dashed var(--border);border-radius:12px;padding:40px 20px;
     text-align:center;background:#fffbeb;
   }
+  .voice-mode{display:flex;align-items:center;gap:12px;margin-bottom:10px;font-weight:600}
+  .voice-mode select{flex:1;min-width:0;border:2px solid var(--border);border-radius:10px;padding:12px;font-size:18px;font-family:inherit;background:#fff;color:var(--text)}
+  .voice-note{font-size:16px;line-height:1.6;color:var(--muted);margin-bottom:12px}
+  .voice-clarify{margin-top:12px}
+  .voice-clarify p{font-size:16px;color:var(--muted);margin-bottom:8px}
   .mic-btn{
     width:96px;height:96px;border-radius:50%;border:none;background:var(--primary);
     color:#fff;font-size:40px;cursor:pointer;box-shadow:0 6px 18px rgba(249,115,22,.35);
@@ -202,11 +207,26 @@
     </div>
 
     <div class="panel" id="panel-voice">
+      <label class="voice-mode" for="voiceDialect">
+        选择说话方式
+        <select id="voiceDialect">
+          <option value="mandarin">普通话</option>
+          <option value="sichuan">四川话</option>
+          <option value="cantonese">粤语</option>
+          <option value="shanghai">上海话</option>
+        </select>
+      </label>
+      <p class="voice-note">目前支持普通话、四川话、粤语和上海话。其他地方口音暂不能保证识别。先选最接近的说话方式，再点麦克风开始；发现高风险会立即提醒。</p>
       <div class="voice-area">
-        <button class="mic-btn" id="micBtn">🎤</button>
-        <div class="voice-status" id="voiceStatus">点击麦克风开始说话<br>松开后自动识别</div>
+        <button class="mic-btn" id="micBtn" aria-label="开始语音检测">🎤</button>
+        <div class="voice-status" id="voiceStatus">点击麦克风开始说话，再点一次停止<br>结束后会按所选说话方式复核</div>
       </div>
       <div id="voiceResult"></div>
+      <div id="voiceClarify" class="voice-clarify" hidden>
+        <p>这段语音可能没听清。请按实际听到的内容修正或补充，不确定的内容不要猜。</p>
+        <textarea id="voiceCorrectionText" rows="3" aria-label="核对并补充语音识别文字"></textarea>
+        <button class="btn btn-primary" id="analyzeCorrectedVoiceBtn">确认文字并检测</button>
+      </div>
       <button class="btn btn-primary" id="analyzeVoiceBtn" disabled>🔍 识别语音内容是否诈骗</button>
     </div>
   </div>
@@ -285,6 +305,10 @@
       var samples = rendered.getChannelData(0);
       var wav = new ArrayBuffer(44 + samples.length * 2);
       var view = new DataView(wav);
+      var squareTotal = 0;
+      for(var i = 0; i < samples.length; i++){ squareTotal += samples[i] * samples[i]; }
+      var rms = samples.length ? Math.sqrt(squareTotal / samples.length) : 0;
+      var gain = rms > 0 ? Math.min(3, Math.max(1, 0.06 / rms)) : 1;
       function writeString(offset, value){
         for(var i = 0; i < value.length; i++){ view.setUint8(offset + i, value.charCodeAt(i)); }
       }
@@ -302,7 +326,7 @@
       writeString(36, "data");
       view.setUint32(40, samples.length * 2, true);
       for(var i = 0; i < samples.length; i++){
-        var sample = Math.max(-1, Math.min(1, samples[i]));
+        var sample = Math.max(-1, Math.min(1, samples[i] * gain));
         view.setInt16(44 + i * 2, sample < 0 ? sample * 32768 : sample * 32767, true);
       }
       audioContext.close();
@@ -615,14 +639,24 @@
   var audioBlob = null;
   var speechRecognition = null;
   var voiceTranscript = "";
+  var activeVoiceDialect = "mandarin";
   var highRiskAlerted = false;
   var stopRecognition = false;
+
+  function getMicrophoneStream(){
+    return navigator.mediaDevices.getUserMedia({audio:{autoGainControl:true, noiseSuppression:true, echoCancellation:true}}).catch(function(error){
+      if(error.name === "OverconstrainedError" || error.name === "NotSupportedError" || error.name === "TypeError"){
+        return navigator.mediaDevices.getUserMedia({audio:true});
+      }
+      throw error;
+    });
+  }
 
   function startLiveSpeechRecognition(){
     var RecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
     if(!RecognitionClass){ return false; }
     speechRecognition = new RecognitionClass();
-    speechRecognition.lang = "zh-CN";
+    speechRecognition.lang = activeVoiceDialect === "cantonese" ? "zh-HK" : "zh-CN";
     speechRecognition.continuous = true;
     speechRecognition.interimResults = true;
     speechRecognition.onresult = function(event){
@@ -670,6 +704,7 @@
     stopRecognition = true;
     micBtn.classList.remove("recording");
     micBtn.textContent = "🎤";
+    micBtn.setAttribute("aria-label", "开始语音检测");
     if(speechRecognition){ speechRecognition.stop(); }
     if(mediaRecorder && mediaRecorder.state !== "inactive"){ mediaRecorder.stop(); }
   }
@@ -679,14 +714,17 @@
       if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
         alert("当前浏览器不支持录音，请使用文字或截图识别。"); return;
       }
-      navigator.mediaDevices.getUserMedia({audio:true}).then(function(stream){
+      getMicrophoneStream().then(function(stream){
         recording = true;
         stopRecognition = false;
         highRiskAlerted = false;
         voiceTranscript = "";
+        document.getElementById("voiceClarify").hidden = true;
+        activeVoiceDialect = document.getElementById("voiceDialect").value;
         document.getElementById("voiceResult").textContent = "";
         micBtn.classList.add("recording");
         micBtn.textContent = "🔴";
+        micBtn.setAttribute("aria-label", "停止语音检测");
         voiceStatus.textContent = "正在启动语音监听...";
         audioChunks = [];
         audioBlob = null;
@@ -726,11 +764,16 @@
     var reader = new FileReader();
     reader.onloadend = function(){
       var b64 = reader.result.split(",")[1];
-      apiPost("/api/detect/voice", {audio_base64:b64}).then(function(r){
+      apiPost("/api/detect/voice", {audio_base64:b64, dialect:activeVoiceDialect}).then(function(r){
         btn.disabled = false; btn.textContent = "🔍 识别语音内容是否诈骗";
         if(r.asr_text){
-          document.getElementById("voiceResult").innerHTML =
-            '<div style="background:#fffbeb;border:1px solid var(--border);border-radius:10px;padding:14px;margin-top:14px;font-size:16px;color:var(--muted)"><b>🎤 华为云语音识别结果：</b><br>' + r.asr_text + '</div>';
+          document.getElementById("voiceResult").textContent = "🎤 识别结果：" + r.asr_text;
+        }
+        var lowConfidence = (typeof r.asr_confidence === "number" && r.asr_confidence < 0.55) || !r.asr_text || r.asr_text.trim().length < 3;
+        document.getElementById("voiceClarify").hidden = !lowConfidence;
+        if(lowConfidence){
+          document.getElementById("voiceCorrectionText").value = r.asr_text || voiceTranscript;
+          voiceStatus.textContent = "声音较小或表达不清，请核对文字后补充，或靠近麦克风重说";
         }
         renderResult(r.hits ? r : {level:"low",levelText:"未发现诈骗风险",levelIcon:"✅",hits:[],totalKw:0}, highRiskAlerted);
       }).catch(function(error){
@@ -739,6 +782,22 @@
       });
     };
     reader.readAsDataURL(audioBlob);
+  });
+
+  document.getElementById("analyzeCorrectedVoiceBtn").addEventListener("click", function(){
+    var text = document.getElementById("voiceCorrectionText").value.trim();
+    if(!text){ alert("请先补充听清楚的内容，或重新录音"); return; }
+    apiPost("/api/detect/text", {text:text}).then(function(result){
+      var shouldIntervene = result.level === "high" && !highRiskAlerted;
+      if(shouldIntervene){ highRiskAlerted = true; }
+      renderResult(result, true);
+      if(shouldIntervene){
+        notifyGuard(result);
+        openSos(result);
+      }
+    }).catch(function(error){
+      alert(error.message || "补充内容检测失败");
+    });
   });
 
   var kl = document.getElementById("knowledgeList");
