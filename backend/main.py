@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 from detector import detect, KNOWLEDGE_BASE, SCAM_PATTERNS
 
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("silver-guard")
