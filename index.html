@@ -593,6 +593,20 @@
   smsFile.addEventListener("change", function(e){
     smsFileObj = e.target.files[0];
     if(!smsFileObj) return;
+    if(!/^image\/(jpeg|png)$/.test(smsFileObj.type)){
+      smsFileObj = null;
+      smsFile.value = "";
+      alert("请上传 JPG 或 PNG 格式的短信截图");
+      document.getElementById("analyzeSmsBtn").disabled = true;
+      return;
+    }
+    if(smsFileObj.size > 20 * 1024 * 1024){
+      smsFileObj = null;
+      smsFile.value = "";
+      alert("图片超过 20 MB，请压缩后重新上传");
+      document.getElementById("analyzeSmsBtn").disabled = true;
+      return;
+    }
     var reader = new FileReader();
     reader.onload = function(ev){
       document.getElementById("smsPreview").innerHTML =

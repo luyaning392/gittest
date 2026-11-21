@@ -291,6 +291,16 @@ async def detect_sms(file: UploadFile = File(...)):
     image_bytes = await file.read()
     if not image_bytes:
         raise HTTPException(status_code=400, detail="图片为空")
+    if len(image_bytes) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="图片超过 20 MB，请压缩后重新上传")
+
+    is_png = image_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+    is_jpeg = image_bytes.startswith(b"\xff\xd8\xff")
+    if not (is_png or is_jpeg):
+        raise HTTPException(status_code=415, detail="请上传 JPG 或 PNG 格式的短信截图")
+    if len(image_bytes) < 1024:
+        raise HTTPException(status_code=400, detail="图片尺寸过小，请上传完整的短信截图")
+
     image_b64 = base64.b64encode(image_bytes).decode("utf-8")
 
     obs_url = obs_upload(f"sms/{file.filename}", image_bytes)
