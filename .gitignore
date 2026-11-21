@@ -1,4 +1,4 @@
-﻿# 依赖与缓存
+# 依赖与缓存
 __pycache__/
 *.py[cod]
 .venv/
@@ -17,6 +17,7 @@ credentials*
 .auto-deploy/
 
 # IDE / 工具元数据
+.vscode/
 .arts/
 .codeartsdoer/
 .opencode/

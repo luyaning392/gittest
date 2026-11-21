@@ -34,3 +34,26 @@
 4. 在后端环境变量中配置华为云 AK、SK、Project ID 等凭证。仅公开前端和 API 地址，禁止将云凭证写入前端文件。
 
 部署后可访问后端 `/api/health` 检查 API 状态。手机录音需要 HTTPS 页面并允许麦克风权限。
+
+## 项目文档
+
+- [PROJECT.md](PROJECT.md)：完整项目说明、架构、功能、接口和部署方案
+- [DEMO.md](DEMO.md)：演示文本、验收步骤和云能力说明
+
+## 一键演示
+
+在 Windows PowerShell 中执行：
+
+```powershell
+.\start-demo.ps1
+```
+
+脚本会启动后端 `127.0.0.1:8000`、静态前端 `127.0.0.1:5500`，并打开浏览器。演示文本、预期风险等级和验收步骤见 [DEMO.md](DEMO.md)。
+
+演示时不配置华为云凭证也可以使用文字识别；截图识别、语音识别和云增强能力需要在 `backend/.env` 中配置真实华为云服务凭证。
+
+## 验证后端
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s backend -p 'test_*.py'
+```

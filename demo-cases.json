@@ -1,0 +1,20 @@
+[
+  {
+    "name": "冒充公检法",
+    "text": "我是公安局的，你涉嫌洗钱，请立即将资金转入安全账户配合调查",
+    "expected_level": "high",
+    "expected_type": "冒充公检法诈骗"
+  },
+  {
+    "name": "冒充亲友",
+    "text": "妈，我换号了，我出事了，在医院急需打钱",
+    "expected_level": "high",
+    "expected_type": "冒充亲友/紧急求助诈骗"
+  },
+  {
+    "name": "普通聊天",
+    "text": "今天天气不错，一起去公园散步吧",
+    "expected_level": "low",
+    "expected_type": null
+  }
+]
